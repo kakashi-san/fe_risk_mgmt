@@ -2,8 +2,7 @@ from abc import ABC
 
 import numpy as np
 from src.price_models.binomial.stock_price_params import StockPriceParams
-from src.price_models.binomial.util_matrix import ForwardPriceMatrix
-from src.price_models.binomial.util_matrix import BackwardOptionPriceMatrix as bopm
+from src.price_models.binomial.util_matrix import ForwardProp, BackwardProp
 
 
 class StockPriceLattice(StockPriceParams):
@@ -22,10 +21,7 @@ class StockPriceLattice(StockPriceParams):
             d=d,
         )
 
-        self.sfp = ForwardPriceMatrix(
-            u=u,
-            d=d
-        )
+        self.sfp = ForwardProp()
 
     def generate_lattice(
             self,
@@ -41,8 +37,8 @@ class StockPriceLattice(StockPriceParams):
             lat_level,
             to_level
     ):
-        forward_matrix = self.sfp.get_forward_matrix(
-            to_level=to_level
+        forward_matrix = self.sfp.get_forward_prop_matrix(
+            from_level=to_level - 1
         )
 
         return np.dot(forward_matrix, lat_level)
@@ -110,10 +106,8 @@ class OptionsPricing(StockPriceLattice):
 
         self.is_american = is_american
 
-        self.bopm = bopm(
+        self.bopm = BackwardProp(
             q=model.q,
-            u=model.u,
-            d=model.d
         )
 
     def _get_payoff(
@@ -140,11 +134,11 @@ class OptionsPricing(StockPriceLattice):
                     diff_level=diff_level,
                     base=exp_cashflow,
                 )
-                exp_cashflow = self.bopm.get_backward_matrix(
+                exp_cashflow = self.bopm.get_backward_prop_matrix(
                     from_level=level + 1
                 ).dot(exp_cashflow)
             else:
-                exp_cashflow = self.bopm.get_backward_matrix(
+                exp_cashflow = self.bopm.get_backward_prop_matrix(
                     from_level=level + 1
                 ).dot(exp_cashflow)
         return exp_cashflow
@@ -213,18 +207,196 @@ class Model(ABC):
         self.n = n
 
 
-model = Model(
-    S0=100,
-    q=0.6,
-    u=1.01,
-    d=1 / 1.01,
-    n=5,
-)
-op = OptionsPricing(
-    K=103,
-    model=model,
-    is_american=True,
-)
-op.generate_lattice()
-# op.print_tree()
-print(op.get_price())
+class InterestRateModel(ABC):
+    @property
+    def r0(self):
+        return self._r0
+
+    @r0.setter
+    def r0(self, val):
+        self._r0 = val
+
+    @property
+    def u(self):
+        return self._u
+
+    @u.setter
+    def u(self, val):
+        self._u = val
+
+    @property
+    def d(self):
+        return self._d
+
+    @d.setter
+    def d(self, val):
+        self._d = val
+
+    @property
+    def n(self):
+        return self._n
+
+    @n.setter
+    def n(self, val):
+        self._n = val
+
+    @property
+    def _lattice(self):
+        return self._lat  # [np.array([[self.r0]])]
+
+    @_lattice.setter
+    def _lattice(self, val):
+        self._lat = val
+
+    def __init__(
+            self,
+            r0,
+            u,
+            d,
+            n,
+    ):
+        self.r0 = r0
+        self.u = u
+        self.d = d
+        self.n = n
+
+        self._generate_lattice()
+
+    def _init_lattice(self):
+        self._lattice = [np.array([[self.r0]])]
+
+    def _generate_lattice(self):
+        self._set_up_forward_prop()
+        self._init_lattice()
+
+        for level in list(range(self.n + 1)):
+            self._lattice.append(
+                self._forward_prop.get_forward_prop_matrix(
+                    from_level=level,
+                ).dot(
+                    self._lattice[-1]
+                )
+            )
+
+    def _set_up_forward_prop(self):
+        self._forward_prop = ForwardProp(
+            u=self.u,
+            d=self.d,
+        )
+
+    def get_lattice(self):
+        return self._lattice
+
+    def print_lattice(self):
+        for lattice_arr in self._lattice:
+            print(lattice_arr)
+
+
+class ZCBPriceLattice(ABC):
+    """
+    Generate n period price lattice for Zero Coupon Bond.
+
+    q: risk neutral probability for price movements
+    payoff: pay-off received at the end of expiry period
+    n: number of periods
+    """
+
+    @property
+    def q(self):
+        return self._q
+
+    @q.setter
+    def q(self, val):
+        self._q = val
+
+    @property
+    def payoff(self):
+        return self._payoff
+
+    @payoff.setter
+    def payoff(self, val):
+        self._payoff = val
+
+    @property
+    def n(self):
+        return self._n
+
+    @n.setter
+    def n(self, val):
+        self._n = val
+
+    @property
+    def _array_expiry_payoff(
+            self,
+    ):
+        return self.payoff * np.ones(
+            shape=(self.n, 1)
+        )
+
+    @property
+    def _lattice(self):
+        return self._lat
+
+    @_lattice.setter
+    def _lattice(self, val):
+        self._lat = val
+
+    @property
+    def _int_rate_lattice(self):
+        return self.ir_model.get_lattice()
+
+    def __init__(
+            self,
+            q,
+            payoff,
+            n,
+            ir_model,
+    ):
+        self.q = q
+        self.payoff = payoff
+        self.n = n
+        self.ir_model = ir_model
+        self._generate_lattice()
+
+    def _set_up_backward_prop(self):
+        self._backprop = BackwardProp(
+            q=self.q,
+        )
+
+    def _init_lattice(self):
+        self._lattice = [self._array_expiry_payoff]
+
+    def _back_prop(
+            self,
+            from_level,
+            int_rate_lat,
+    ):
+        int_rat_mul = (int_rate_lat + 1) ** -1
+
+        self._lattice.insert(
+            0,
+            self._backprop.get_backward_prop_matrix(
+                from_level=from_level
+            ).dot(self._lattice[0]) * int_rat_mul
+
+        )
+
+    def _generate_lattice(self):
+        self._init_lattice()
+
+        if self._lattice:
+            self._set_up_backward_prop()
+
+            while len(self._lattice) < self.n:
+                curr_level = len(self._lattice[0]) - 1
+                int_rate_lat = self._int_rate_lattice[curr_level - 1]
+
+                self._back_prop(
+                    from_level=curr_level,
+                    int_rate_lat=int_rate_lat
+                )
+
+    def print_lattice(self):
+        for lattice_arr in self._lattice:
+            print(lattice_arr)
+
