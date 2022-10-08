@@ -8,6 +8,7 @@ r0 = 0.06
 q = 0.5 # 1-q = 0.5
 n = 5
 payoff = 100
+strike = 84.0
 
 ir_m = InterestRateModel(
     r0=r0,
@@ -15,6 +16,7 @@ ir_m = InterestRateModel(
     d=d,
     n=n,
 )
+# ir_m.get_lattice
 # ir_m.print_lattice()
 
 zc_price_lattice = ZCBPriceLattice(
@@ -23,7 +25,31 @@ zc_price_lattice = ZCBPriceLattice(
     n=n,
     ir_model=ir_m
 )
-zc_price_lattice.print_lattice()
+# zc_price_lattice.print_lattice()
+
+# american_option_price_zcb = OptionsPricingZCB(
+#     zcb_price_lattice=zc_price_lattice,
+#     int_rate_model=ir_m,
+#     n_period=3,
+#     q=q,
+#     strike_price=strike,
+#     is_american=True,
+#     option=1,
+# )
+# american_option_price_zcb.print_lattice()
+european_option_price_zcb = OptionsPricingZCB(
+    zcb_price_lattice=zc_price_lattice,
+    int_rate_model=ir_m,
+    n_period=2,
+    q=q,
+    strike_price=strike,
+    is_american=False,
+    option=-1
+
+)
+# american_option_price_zcb.print_lattice()
+european_option_price_zcb.print_lattice()
+# option_price_zcb
 #
 # fm = ForwardMatrix(
 #     u=ir_m.u,

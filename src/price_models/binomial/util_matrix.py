@@ -67,7 +67,7 @@ class BackwardProp(ABC):
         :param from_level: level t having t+1 states.
         :return: backward propagation matrix of dimensions (t,t+1)
         """
-        print("frommmmm", from_level)
+        # print("frommmmm", from_level)
         return np.c_[
                 self.q * np.eye(from_level),
                 np.zeros(from_level)

@@ -284,6 +284,7 @@ class InterestRateModel(ABC):
             d=self.d,
         )
 
+    @property
     def get_lattice(self):
         return self._lattice
 
@@ -326,14 +327,6 @@ class ZCBPriceLattice(ABC):
         self._n = val
 
     @property
-    def _array_expiry_payoff(
-            self,
-    ):
-        return self.payoff * np.ones(
-            shape=(self.n, 1)
-        )
-
-    @property
     def _lattice(self):
         return self._lat
 
@@ -342,21 +335,12 @@ class ZCBPriceLattice(ABC):
         self._lat = val
 
     @property
-    def _int_rate_lattice(self):
-        return self.ir_model.get_lattice()
+    def lattice(self):
+        return self._lattice
 
-    def __init__(
-            self,
-            q,
-            payoff,
-            n,
-            ir_model,
-    ):
-        self.q = q
-        self.payoff = payoff
-        self.n = n
-        self.ir_model = ir_model
-        self._generate_lattice()
+    @property
+    def _int_rate_lattice(self):
+        return self._ir_model.get_lattice
 
     def _set_up_backward_prop(self):
         self._backprop = BackwardProp(
@@ -364,7 +348,11 @@ class ZCBPriceLattice(ABC):
         )
 
     def _init_lattice(self):
-        self._lattice = [self._array_expiry_payoff]
+        self._lattice = [
+            self.payoff * np.ones(
+                shape=(self.n, 1)
+            )
+        ]
 
     def _back_prop(
             self,
@@ -400,3 +388,179 @@ class ZCBPriceLattice(ABC):
         for lattice_arr in self._lattice:
             print(lattice_arr)
 
+    def __init__(
+            self,
+            q,
+            payoff,
+            n,
+            ir_model,
+    ):
+        self.q = q
+        self.payoff = payoff
+        self.n = n
+        self._ir_model = ir_model
+
+        self._generate_lattice()
+
+
+class OptionsPricingZCB(ABC):
+    @property
+    def q(self):
+        return self._q
+
+    @q.setter
+    def q(self, val):
+        self._q = val
+
+    @property
+    def n_period(self):
+        return self._n_period
+
+    @n_period.setter
+    def n_period(self, val):
+        self._n_period = val
+
+    @property
+    def strike_price(self):
+        return self._strike_price
+
+    @strike_price.setter
+    def strike_price(self, val):
+        self._strike_price = val
+
+    def _set_up_backward_prop(self):
+        self._backprop = BackwardProp(
+            q=self.q,
+        )
+
+    def _present_val_fut_cashflow(
+            self,
+            from_level,
+            int_rat_mul,
+            fut_cashflow,
+    ):
+        return self._backprop.get_backward_prop_matrix(
+            from_level=from_level
+        ).dot(
+            fut_cashflow
+        ) * int_rat_mul
+
+    def _back_push_lattice(
+            self,
+            val,
+    ):
+        self._lattice.insert(
+            0,
+            val
+        )
+
+    def _append_to_lattice(
+            self,
+            val
+    ):
+        self._lattice.append(
+            val
+        )
+
+    def _get_exer_val(
+            self,
+            val
+    ):
+        return np.maximum(
+            0,
+            ( val - self.strike_price) * self.option
+        )
+
+    def _back_prop(
+            self,
+            from_level,
+            int_rate_lat,
+            fut_cashflow,
+    ):
+        int_rat_mul = (int_rate_lat + 1) ** -1
+
+        present_val_fut_cf = self._present_val_fut_cashflow(
+            from_level=from_level,
+            int_rat_mul=int_rat_mul,
+            fut_cashflow=fut_cashflow,
+        )
+        if self.is_american:
+            exercise_val = self._get_exer_val(
+                val=self._zcb_price_lattice.lattice[from_level - 1]
+            )
+        else:
+            exercise_val = None
+
+        return present_val_fut_cf, exercise_val
+
+    def _generate_lattice(self):
+
+        # initialise the payoff
+        self._init_lattice()
+
+        # set up back prop matrix
+        self._set_up_backward_prop()
+        curr_level = self._n_period
+
+        while len(self._lattice) < self._n_period + 1:
+            # self.print_lattice()
+
+            present_val_fut_cf, exec_val = self._back_prop(
+                from_level=curr_level,
+                fut_cashflow=self._lattice[0],
+                int_rate_lat=self._int_rate_model.get_lattice[curr_level - 1]
+            )
+
+            # American option
+            if self.is_american:
+                lattice_state = np.maximum(
+                    present_val_fut_cf,
+                    exec_val,
+                )
+
+            # European option
+            else:
+                assert exec_val is None
+                lattice_state = present_val_fut_cf
+
+            self._back_push_lattice(
+                val=lattice_state
+            )
+            curr_level -= 1
+
+    def _init_lattice(self):
+        self._zcb_payoff_expiry = self._zcb_price_lattice.lattice[
+            self.n_period
+        ]
+
+        self._lattice = [
+            self._get_exer_val(
+                val=self._zcb_payoff_expiry
+            ),
+        ]
+
+    def print_lattice(self):
+        for lattice_arr in self._lattice:
+            print(lattice_arr)
+
+    def __init__(
+            self,
+            zcb_price_lattice,
+            int_rate_model,
+            n_period,
+            q,
+            strike_price,
+            is_american=True,
+            option=1,  # 1 for call option, -1 for put option
+            early_exercise=True,
+    ):
+        self._zcb_price_lattice = zcb_price_lattice
+        self._int_rate_model = int_rate_model
+        self.n_period = n_period
+        self.q = q
+        self.strike_price = strike_price
+        self.is_american = is_american
+        self.option = option
+        self.early_exercise = early_exercise
+
+        self._generate_lattice()
