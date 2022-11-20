@@ -1,6 +1,78 @@
 import numpy as np
 from abc import ABC
 
+# from src.price_models.binomial.util_matrix import BackwardProp
+from src.price_models.binomial.util_matrix import BackwardProp
+# from src.price.mutil_matrix import BackwardProp
+
+class BackPropLattice(ABC):
+    
+    @property
+    def n(self):
+        return self._n
+
+    @n.setter
+    def n(self, val):
+        self._n = val
+
+    @property
+    def q(self):
+        return self._q
+
+    @q.setter
+    def q(self, val):
+        self._q = val
+    
+    @property
+    def lattice(self):
+        return self._lat
+
+    @lattice.setter
+    def lattice(self, val):
+        self._lat = val
+
+    @property
+    def _curr_states(self):
+        return self.lattice[0]
+
+    @property
+    def _idx_curr_states(self):
+        return len(self._curr_states) - 1
+    
+    def _init_lattice(self, val):
+        self.lattice = [
+            val,
+        ]
+    
+    def _back_push_lattice(
+            self,
+            val,
+    ):
+        self.lattice.insert(
+            0,
+            val
+        )
+
+    def _set_up_backward_prop(
+            self,
+            use_q=True,
+    ):
+        self._backprop_set_up = BackwardProp(
+            q=self.q if use_q else 0.5,
+        )
+    def __init__(
+        self,
+        n,
+        q,
+        val,
+        ) -> None:
+
+        self.n = n
+        self.q = q
+        self._init_lattice(
+            val = val
+        )
+
 
 class BinomialTree(ABC):
     @property
